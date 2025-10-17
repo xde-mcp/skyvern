@@ -41,7 +41,6 @@ from skyvern.forge.sdk.schemas.organizations import Organization
 from skyvern.forge.sdk.schemas.tasks import Task
 from skyvern.forge.sdk.schemas.workflow_runs import WorkflowRunBlock, WorkflowRunTimeline, WorkflowRunTimelineType
 from skyvern.forge.sdk.trace import TraceManager
-from skyvern.forge.sdk.trace.experiment_utils import collect_experiment_metadata_safely
 from skyvern.forge.sdk.workflow.exceptions import (
     ContextParameterSourceNotDefined,
     InvalidWaitBlockTime,
@@ -347,11 +346,6 @@ class WorkflowService:
         """Execute a workflow."""
         organization_id = organization.organization_id
 
-        # Collect and add experiment metadata to the trace
-        experiment_metadata = await collect_experiment_metadata_safely(app.EXPERIMENTATION_PROVIDER)
-        if experiment_metadata:
-            TraceManager.add_experiment_metadata(experiment_metadata)
-
         LOG.info(
             "Executing workflow",
             workflow_run_id=workflow_run_id,
@@ -475,7 +469,8 @@ class WorkflowService:
                 LOG.info(
                     "Workflow run is already timed_out, canceled, failed, or terminated, not marking as completed",
                     workflow_run_id=workflow_run_id,
-                    workflow_run_status=workflow_run.status if workflow_run else None,
+                    workflow_run_status=workflow_run.status,
+                    run_with=workflow_run.run_with,
                 )
         await self.clean_up_workflow(
             workflow=workflow,
@@ -1137,7 +1132,7 @@ class WorkflowService:
         organization_id: str | None = None,
         page: int = 1,
         page_size: int = 10,
-        title: str = "",
+        search_key: str = "",
         statuses: list[WorkflowStatus] | None = None,
     ) -> list[Workflow]:
         return await app.DATABASE.get_workflows_by_permanent_ids(
@@ -1145,7 +1140,7 @@ class WorkflowService:
             organization_id=organization_id,
             page=page,
             page_size=page_size,
-            title=title,
+            title=search_key,
             statuses=statuses,
         )
 
@@ -1156,11 +1151,14 @@ class WorkflowService:
         page_size: int = 10,
         only_saved_tasks: bool = False,
         only_workflows: bool = False,
-        title: str = "",
+        search_key: str | None = None,
         statuses: list[WorkflowStatus] | None = None,
     ) -> list[Workflow]:
         """
         Get all workflows with the latest version for the organization.
+
+        Args:
+            search_key: Unified search term for title and parameter metadata (replaces title/parameter).
         """
         return await app.DATABASE.get_workflows_by_organization_id(
             organization_id=organization_id,
@@ -1168,7 +1166,7 @@ class WorkflowService:
             page_size=page_size,
             only_saved_tasks=only_saved_tasks,
             only_workflows=only_workflows,
-            title=title,
+            search_key=search_key,
             statuses=statuses,
         )
 
@@ -1327,6 +1325,7 @@ class WorkflowService:
         page: int = 1,
         page_size: int = 10,
         status: list[WorkflowRunStatus] | None = None,
+        search_key: str | None = None,
     ) -> list[WorkflowRun]:
         return await app.DATABASE.get_workflow_runs_for_workflow_permanent_id(
             workflow_permanent_id=workflow_permanent_id,
@@ -1334,6 +1333,7 @@ class WorkflowService:
             page=page,
             page_size=page_size,
             status=status,
+            search_key=search_key,
         )
 
     async def create_workflow_run(
@@ -2992,6 +2992,7 @@ class WorkflowService:
                 cache_key_value=rendered_cache_key_value,
                 script_id=existing_script.script_id,
                 script_revision_id=existing_script.script_revision_id,
+                run_with=workflow_run.run_with,
             )
             return
 

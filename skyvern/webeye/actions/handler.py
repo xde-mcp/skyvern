@@ -648,6 +648,7 @@ async def handle_click_action(
             incremental_scraped = IncrementalScrapePage(skyvern_frame=skyvern_frame)
             await incremental_scraped.start_listen_dom_increment(await skyvern_element.get_element_handler())
 
+            has_onclick_attr = await skyvern_element.has_attr("onclick", mode="static")
             results = await chain_click(
                 task,
                 scraped_page,
@@ -663,6 +664,12 @@ async def handle_click_action(
                 return results
 
             try:
+                if has_onclick_attr:
+                    LOG.info(
+                        "The element has onclick attribute, waiting for 1 second to load new elements", action=action
+                    )
+                    await skyvern_frame.safe_wait_for_animation_end(before_wait_sec=1)
+
                 if sequential_click_result := await handle_sequential_click_for_dropdown(
                     action=action,
                     action_history=results,
@@ -785,11 +792,13 @@ async def handle_sequential_click_for_dropdown(
 
     if dropdown_select_context.is_date_related:
         LOG.info(
-            "The dropdown is date related, exiting the sequential click logic",
+            "The dropdown is date related, exiting the sequential click logic and skipping the remaining actions",
             step_id=step.step_id,
             task_id=task.task_id,
         )
-        return None
+        result = ActionSuccess()
+        result.skip_remaining_actions = True
+        return result
 
     LOG.info(
         "Found the dropdown menu element after clicking, triggering the sequential click logic",
@@ -1139,6 +1148,7 @@ async def handle_input_text_action(
         and skyvern_element.get_tag_name() == InteractiveElement.INPUT
         and not await skyvern_element.is_raw_input()
     ):
+        has_onclick_attr = await skyvern_element.has_attr("onclick", mode="static")
         await skyvern_element.scroll_into_view()
         # press arrowdown to watch if there's any options popping up
         await incremental_scraped.start_listen_dom_increment(await skyvern_element.get_element_handler())
@@ -1164,7 +1174,12 @@ async def handle_input_text_action(
                 action=action,
             )
 
-        await skyvern_frame.safe_wait_for_animation_end()
+        wait_sec = 0
+        if has_onclick_attr:
+            LOG.info("The element has onclick attribute, waiting for 1 second to load new elements", action=action)
+            wait_sec = 1
+
+        await skyvern_frame.safe_wait_for_animation_end(before_wait_sec=wait_sec)
         incremental_element = await incremental_scraped.get_incremental_element_tree(
             clean_and_remove_element_tree_factory(
                 task=task, step=step, check_filter_funcs=[check_existed_but_not_option_element_in_dom_factory(dom)]
@@ -3477,6 +3492,16 @@ async def locate_dropdown_menu(
                     task_id=task.task_id,
                     exc_info=True,
                 )
+        # check if opening react-datetime datepicker: https://github.com/arqex/react-datetime
+        class_name = await head_element.get_attr("class", mode="static")
+        if class_name and "rdtOpen" in class_name:
+            LOG.info(
+                "Confirm it's an opened React-Datetime datepicker",
+                element_id=element_id,
+                step_id=step.step_id,
+                task_id=task.task_id,
+            )
+            return head_element
 
         # sometimes taking screenshot might scroll away, need to scroll back after the screenshot
         x, y = await skyvern_frame.get_scroll_x_y()

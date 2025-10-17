@@ -899,6 +899,8 @@ async def _regenerate_script_block_after_ai_fallback(
     2. create a completely new script, with only the current block's script being different as it's newly generated.
       -
     """
+    LOG.info("skipping script regeneration after AI fallback")
+    return None
     try:
         # Get the current script for this workflow and cache key value
         # Render the cache_key_value from workflow run parameters (same logic as generate_script_for_workflow)
@@ -1954,20 +1956,24 @@ async def goto(
     label: str | None = None,
     parameters: list[str] | None = None,
 ) -> None:
-    block_validation_output = await _validate_and_get_output_parameter(label, parameters)
-    url = _render_template_with_label(url, label)
-    goto_url_block = UrlBlock(
-        url=url,
-        label=block_validation_output.label,
-        output_parameter=block_validation_output.output_parameter,
-        parameters=block_validation_output.input_parameters,
-    )
-    await goto_url_block.execute_safe(
-        workflow_run_id=block_validation_output.workflow_run_id,
-        parent_workflow_run_block_id=block_validation_output.context.parent_workflow_run_block_id,
-        organization_id=block_validation_output.organization_id,
-        browser_session_id=block_validation_output.browser_session_id,
-    )
+    try:
+        block_validation_output = await _validate_and_get_output_parameter(label, parameters)
+        url = _render_template_with_label(url, label)
+        goto_url_block = UrlBlock(
+            url=url,
+            label=block_validation_output.label,
+            output_parameter=block_validation_output.output_parameter,
+            parameters=block_validation_output.input_parameters,
+        )
+        await goto_url_block.execute_safe(
+            workflow_run_id=block_validation_output.workflow_run_id,
+            parent_workflow_run_block_id=block_validation_output.context.parent_workflow_run_block_id,
+            organization_id=block_validation_output.organization_id,
+            browser_session_id=block_validation_output.browser_session_id,
+        )
+    except Exception:
+        run_context = script_run_context_manager.ensure_run_context()
+        await run_context.page.goto(url)
 
 
 async def prompt(
